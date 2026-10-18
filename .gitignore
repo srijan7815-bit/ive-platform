@@ -1,0 +1,26 @@
+# .NET
+bin/
+obj/
+out/
+*.user
+.vs/
+TestResults/
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+# Secrets & env — never commit
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+# OS
+.DS_Store
+Thumbs.db
