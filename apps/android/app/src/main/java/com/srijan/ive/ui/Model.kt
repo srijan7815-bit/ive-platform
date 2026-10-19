@@ -6,6 +6,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CompletableDeferred
 
+enum class VoiceState { Idle, Recording, Transcribing }
+
 enum class TaskStatus { Queued, Running, Awaiting, Done, Error, Cancelled }
 
 class TaskUi(val id: Long, val prompt: String) {

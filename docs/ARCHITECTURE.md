@@ -35,11 +35,21 @@ flowchart LR
    - *Android*: edge-to-edge with `safeDrawing` insets (cutouts, gesture bars, IME); single column on phones, two panes ≥ 720 dp (tablets, foldables, landscape); notch width = `min(420 dp, screen − 24 dp)`.
 5. **Real glass where the OS allows it.** Control center uses DWM acrylic. The prompt box blurs an actual snapshot of the desktop behind it.
 
+## App control on Android (how "ask first" works)
+1. `open_app` / any UI tool → `ToolRunner.ensureGranted(pkg)`: if the app has no grant, the user gets an **Allow / Deny** card (in-app notch, or the accessibility **overlay** when IVE isn't on screen). *Allow* is stored in `AppGrants`; revoke in Settings.
+2. Every UI action re-checks the **current foreground package** — switching apps mid-task cannot bypass a grant.
+3. `IveAccessibilityService` reads a compact numbered tree (passwords masked) and performs `ACTION_CLICK` / `SET_TEXT` / scroll or falls back to gestures. A floating pill shows what IVE is doing with a **Stop** button.
+
+## Voice
+`VoiceRecorder` (WinMM / MediaRecorder) → `SpeechClient` → `POST {base}/audio/transcriptions` with `whisper-large-v3-turbo`. The voice key/base URL are optional and default to the main ones.
+
 ## Behavioral parity
 | Capability | Windows | Android |
 |---|---|---|
 | Invoke | Hold trigger + right-drag (swallows the right-click), `Ctrl+Alt+Space`, tray | Open app / composer |
 | Notch | Top-center overlay, click-through | In-app Dynamic-Island surface |
 | Tools | files + shell (approval-gated) | sandboxed files, device info, open link |
-| Music | WinRT now-playing + transport | Media-key transport |
+| Voice | NAudio → Groq Whisper | MediaRecorder → Groq Whisper |
+| App control | Files + shell | Accessibility (any app, per-app grant) |
+| Music | WinRT now-playing, user-chosen app | Targeted media buttons, user-chosen app |
 | Secrets | DPAPI | Keystore |

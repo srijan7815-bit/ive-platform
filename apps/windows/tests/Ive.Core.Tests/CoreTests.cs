@@ -135,7 +135,7 @@ public class TaskManagerTests
 
 public class SettingsTests
 {
-    private sealed class Rev : ISecretProtector
+    public sealed class RevProtector : ISecretProtector
     {
         public string Protect(string p) => new string(p.Reverse().ToArray());
         public string Unprotect(string c) => new string(c.Reverse().ToArray());
@@ -147,10 +147,10 @@ public class SettingsTests
     public void ApiKeyIsEncryptedOnDiskAndRestored()
     {
         var f = File_();
-        var s = new SettingsStore(f, new Rev());
+        var s = new SettingsStore(f, new RevProtector());
         s.Update(x => x.ApiKey = "sk-secret-1234");
         Assert.DoesNotContain("sk-secret-1234", File.ReadAllText(f));
-        var again = new SettingsStore(f, new Rev());
+        var again = new SettingsStore(f, new RevProtector());
         Assert.Equal("sk-secret-1234", again.Current.ApiKey);
         Assert.Equal("••••1234", again.KeyHint);
     }
@@ -158,11 +158,56 @@ public class SettingsTests
     [Fact]
     public void ValidationRejectsInsecureUrlsAndBadValues()
     {
-        var s = new SettingsStore(File_(), new Rev());
+        var s = new SettingsStore(File_(), new RevProtector());
         Assert.Throws<ArgumentException>(() => s.Update(x => x.ApiBaseUrl = "http://evil.example.com/v1"));
         s.Update(x => x.ApiBaseUrl = "http://localhost:8080/v1/");
         Assert.Equal("http://localhost:8080/v1", s.Current.ApiBaseUrl);
         Assert.Throws<ArgumentException>(() => s.Update(x => x.TriggerKey = "Fn"));
         Assert.Throws<ArgumentException>(() => s.Update(x => x.WorkspaceDir = "/definitely/not/here"));
+    }
+}
+
+public class SpeechTests
+{
+    private sealed class FakeHandler : HttpMessageHandler
+    {
+        public HttpRequestMessage Seen; public string Body;
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Seen = request; Body = await request.Content!.ReadAsStringAsync(ct);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("{\"text\":\"  open spotify  \"}") };
+        }
+    }
+
+    [Fact]
+    public async Task TranscribesWithWhisperTurboAndBearerAuth()
+    {
+        var h = new FakeHandler();
+        var s = new IveSettings { ApiKey = "gsk_test" };
+        var text = await new SpeechClient(new HttpClient(h)).TranscribeAsync(s, new byte[4000], "a.wav", "audio/wav", default);
+        Assert.Equal("open spotify", text);
+        Assert.Equal("https://api.groq.com/openai/v1/audio/transcriptions", h.Seen.RequestUri!.ToString());
+        Assert.Equal("Bearer gsk_test", h.Seen.Headers.Authorization!.ToString());
+        Assert.Contains("whisper-large-v3-turbo", h.Body);
+    }
+
+    [Fact]
+    public async Task RejectsMissingKeyAndTinyRecordings()
+    {
+        var c = new SpeechClient(new HttpClient(new FakeHandler()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => c.TranscribeAsync(new IveSettings(), new byte[4000], "a.wav", "audio/wav", default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => c.TranscribeAsync(new IveSettings { ApiKey = "k" }, new byte[10], "a.wav", "audio/wav", default));
+    }
+
+    [Fact]
+    public void VoiceKeyIsEncryptedAndMusicSettingsPersist()
+    {
+        var f = Path.Combine(Directory.CreateTempSubdirectory("ive").FullName, "s.json");
+        var s = new SettingsStore(f, new SettingsTests.RevProtector());
+        s.Update(x => { x.SttApiKey = "gsk_voice_9999"; x.MusicApp = "Spotify"; x.MusicLaunch = "spotify:"; });
+        Assert.DoesNotContain("gsk_voice_9999", File.ReadAllText(f));
+        var again = new SettingsStore(f, new SettingsTests.RevProtector());
+        Assert.Equal("gsk_voice_9999", again.Current.SttApiKey);
+        Assert.Equal("Spotify", again.Current.MusicApp);
     }
 }

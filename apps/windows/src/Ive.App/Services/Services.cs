@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
@@ -36,6 +39,9 @@ public sealed class MediaService : IDisposable
     private int _busy;
 
     public MediaState State => _state;
+
+    /// <summary>Substring of the media source app id the user chose (e.g. "Spotify"). Blank = whatever Windows considers current.</summary>
+    public string Preferred { get; set; } = "";
     public event Action<MediaState> Changed;
 
     public async Task StartAsync()
@@ -53,7 +59,7 @@ public sealed class MediaService : IDisposable
         if (_mgr == null || Interlocked.Exchange(ref _busy, 1) == 1) return;
         try
         {
-            var s = _mgr.GetCurrentSession();
+            var s = Pick();
             var next = MediaState.None;
             if (s != null)
             {
@@ -67,11 +73,38 @@ public sealed class MediaService : IDisposable
         finally { Interlocked.Exchange(ref _busy, 0); }
     }
 
+    private GlobalSystemMediaTransportControlsSession Pick()
+    {
+        if (_mgr == null) return null;
+        if (string.IsNullOrWhiteSpace(Preferred)) return _mgr.GetCurrentSession();
+        foreach (var s in _mgr.GetSessions())
+            if (s.SourceAppUserModelId.IndexOf(Preferred, StringComparison.OrdinalIgnoreCase) >= 0) return s;
+        return null; // the chosen app isn't playing: never fall back to controlling a different app
+    }
+
+    /// <summary>Friendly names of apps currently exposing media controls (for the music-app picker).</summary>
+    public IReadOnlyList<string> Sources()
+    {
+        try
+        {
+            return _mgr?.GetSessions().Select(s => s.SourceAppUserModelId.Split('!').Last().Replace(".exe", "", StringComparison.OrdinalIgnoreCase)).Distinct().ToList() ?? new List<string>();
+        }
+        catch { return new List<string>(); }
+    }
+
+    /// <summary>Starts the user's music app (exe path, URI such as spotify:, or any shell target). Returns an error message or null.</summary>
+    public static string Launch(string target)
+    {
+        if (string.IsNullOrWhiteSpace(target)) return "Set a launch target in Settings → Music app.";
+        try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); return null; }
+        catch (Exception e) { return e.Message; }
+    }
+
     public async Task ControlAsync(string action)
     {
         try
         {
-            var s = _mgr?.GetCurrentSession();
+            var s = Pick();
             if (s == null) return;
             if (action == "playpause") await s.TryTogglePlayPauseAsync();
             else if (action == "next") await s.TrySkipNextAsync();

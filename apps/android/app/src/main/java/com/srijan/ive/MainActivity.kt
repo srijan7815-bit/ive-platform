@@ -6,6 +6,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.srijan.ive.control.AppBridge
+import com.srijan.ive.control.IveAccessibilityService
 import com.srijan.ive.ui.IveApp
 import com.srijan.ive.ui.IveTheme
 
@@ -17,5 +19,17 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         setContent { IveTheme { IveApp() } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AppBridge.activityVisible = true
+        AppBridge.tick++
+        IveAccessibilityService.instance?.overlayClear()
+    }
+
+    override fun onPause() {
+        AppBridge.activityVisible = false
+        super.onPause()
     }
 }

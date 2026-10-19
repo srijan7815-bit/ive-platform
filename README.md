@@ -26,8 +26,15 @@ Hold a key, drag, and ask. IVE does the work in the background and asks before i
 | Glass | DWM acrylic window + real desktop-blur prompt | Layered translucent glass over animated aurora |
 | Motion | Per-frame **spring physics**, squash-and-stretch task bubble | Compose spring physics on width / height / radius |
 | Auto-fit | PerMonitorV2 DPI, per-display scale, rail ⇄ tab-bar reflow | Edge-to-edge insets, phone ⇄ tablet/foldable two-pane |
-| Music | WinRT now-playing + transport | Media-key transport |
+| **Voice** | Mic button + `Ctrl+Alt+V`, **Whisper large-v3-turbo (Groq)** | Mic button, **Whisper large-v3-turbo (Groq)** |
+| **App control** | Files + shell (approval-gated) | **Operates any app** via Accessibility — asks per app, Stop pill, overlay approvals |
+| Music | WinRT now-playing + transport, **you pick the app** | Media-key transport, **you pick the app** |
 | Secrets | DPAPI-encrypted API key | Android Keystore (AES-256-GCM) |
+
+## Quick start (Groq — one key does it all)
+1. Get a free key at console.groq.com and paste it in **Settings → API key**. Defaults: `llama-3.3-70b-versatile` for the agent, `whisper-large-v3-turbo` for voice. Any OpenAI-compatible endpoint works.
+2. **Android:** *Settings → App control* → enable the Accessibility service (and *Display over other apps*). IVE asks before touching each app and you can revoke any time.
+3. Pick your **music app** in Settings. Tap the 🎤 and talk.
 
 ## What it does
 - **Ask in natural language** — the agent plans with an OpenAI-compatible model and uses tools to read, list, write and delete files (and run shell commands on Windows).

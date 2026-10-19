@@ -1,6 +1,22 @@
 package com.srijan.ive.ui
 
 import android.view.KeyEvent
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.draw.scale
+import androidx.core.content.ContextCompat
+import com.srijan.ive.control.AppBridge
+import com.srijan.ive.data.InstalledApps
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
@@ -85,7 +101,7 @@ fun IveApp(vm: IveViewModel = viewModel()) {
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
                             Text("IVE", color = Ive.ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                            MusicCard()
+                            MusicCard(vm)
                             Composer(vm)
                         }
                         Feed(vm, Modifier.weight(0.58f).fillMaxHeight(), showMusic = false)
@@ -95,6 +111,12 @@ fun IveApp(vm: IveViewModel = viewModel()) {
                     Composer(vm, Modifier.padding(12.dp))
                 }
             }
+        }
+        vm.notice?.let { msg ->
+            Box(
+                Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(start = 24.dp, end = 24.dp, bottom = 92.dp)
+                    .glass(RoundedCornerShape(50), strong = true).padding(horizontal = 18.dp, vertical = 10.dp),
+            ) { Text(msg, color = Ive.ink, fontSize = 13.sp) }
         }
         AnimatedVisibility(
             visible = vm.showSettings,
@@ -111,7 +133,7 @@ private fun Feed(vm: IveViewModel, modifier: Modifier, showMusic: Boolean) {
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (showMusic) item { MusicCard() }
+        if (showMusic) item { MusicCard(vm) }
         if (vm.tasks.isEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 48.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -170,28 +192,36 @@ private fun TaskCard(t: TaskUi, onCancel: () -> Unit) {
 }
 
 @Composable
-private fun MusicCard() {
+private fun MusicCard(vm: IveViewModel) {
     val ctx = LocalContext.current
+    val pkg = vm.config.musicPackage
+    val appName = remember(pkg) { if (pkg.isEmpty()) "" else InstalledApps.label(ctx, pkg) }
     Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(26.dp)).padding(18.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Box(
                 Modifier.size(54.dp).clip(RoundedCornerShape(16.dp))
-                    .background(Brush.sweepGradient(listOf(Ive.accent, Ive.accent2, Color(0xFFF472B6), Ive.accent))),
+                    .background(Brush.sweepGradient(listOf(Ive.accent, Ive.accent2, Color(0xFFF472B6), Ive.accent)))
+                    .clickable { if (pkg.isNotEmpty()) InstalledApps.launch(ctx, pkg) else vm.showSettings = true },
             )
             Column(Modifier.weight(1f)) {
                 Text("Music", color = Ive.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                Text("Control whatever is playing", color = Ive.ink3, fontSize = 12.sp)
+                Text(
+                    if (pkg.isEmpty()) "Tap to choose your music app" else "Controlling $appName",
+                    color = Ive.ink3, fontSize = 12.sp, maxLines = 1,
+                )
             }
-            GlyphButton("⏮") { MediaKeys.send(ctx, KeyEvent.KEYCODE_MEDIA_PREVIOUS) }
-            GlyphButton("⏯") { MediaKeys.send(ctx, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) }
-            GlyphButton("⏭") { MediaKeys.send(ctx, KeyEvent.KEYCODE_MEDIA_NEXT) }
+            GlyphButton("⏮", diameter = 40) { MediaKeys.send(ctx, KeyEvent.KEYCODE_MEDIA_PREVIOUS, pkg) }
+            GlyphButton("⏯", diameter = 40) { MediaKeys.send(ctx, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, pkg) }
+            GlyphButton("⏭", diameter = 40) { MediaKeys.send(ctx, KeyEvent.KEYCODE_MEDIA_NEXT, pkg) }
         }
     }
 }
 
 @Composable
 private fun Composer(vm: IveViewModel, modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
     var text by remember { mutableStateOf("") }
+
     fun send() {
         if (text.isBlank()) return
         if (!vm.config.ready) {
@@ -201,6 +231,32 @@ private fun Composer(vm: IveViewModel, modifier: Modifier = Modifier) {
         vm.submit(text)
         text = ""
     }
+
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.startVoice() else vm.toast("Microphone permission is needed for voice input.")
+    }
+
+    fun micTap() {
+        when (vm.voice) {
+            VoiceState.Idle ->
+                if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.startVoice()
+                else permission.launch(Manifest.permission.RECORD_AUDIO)
+            VoiceState.Recording -> vm.stopVoice { t ->
+                text = (text + " " + t).trim()
+                if (vm.config.voiceAutoSend) send()
+            }
+            VoiceState.Transcribing -> Unit
+        }
+    }
+
+    val level by animateFloatAsState(vm.voiceLevel, label = "level")
+    val recording = vm.voice == VoiceState.Recording
+    val hint = when (vm.voice) {
+        VoiceState.Recording -> "Listening… tap ■ when you're done"
+        VoiceState.Transcribing -> "Transcribing…"
+        VoiceState.Idle -> "Tell IVE what to do…"
+    }
+
     Row(
         modifier.fillMaxWidth().glass(RoundedCornerShape(28.dp), strong = true).padding(start = 6.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -209,7 +265,7 @@ private fun Composer(vm: IveViewModel, modifier: Modifier = Modifier) {
             value = text,
             onValueChange = { text = it },
             modifier = Modifier.weight(1f),
-            placeholder = { Text("Tell IVE what to do…", color = Ive.ink3) },
+            placeholder = { Text(hint, color = Ive.ink3) },
             maxLines = 4,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { send() }),
@@ -224,6 +280,18 @@ private fun Composer(vm: IveViewModel, modifier: Modifier = Modifier) {
             ),
         )
         Box(
+            Modifier.size(44.dp).scale(if (recording) 1f + 0.3f * level else 1f).clip(CircleShape)
+                .background(if (recording) Ive.bad else Color.White.copy(alpha = 0.14f))
+                .clickable { micTap() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                when (vm.voice) { VoiceState.Idle -> "🎤"; VoiceState.Recording -> "■"; VoiceState.Transcribing -> "…" },
+                color = if (recording) Ive.bg else Ive.ink, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Box(
             Modifier.size(44.dp).clip(CircleShape)
                 .background(Brush.linearGradient(listOf(Ive.accent, Ive.accent2)))
                 .clickable { send() },
@@ -233,13 +301,38 @@ private fun Composer(vm: IveViewModel, modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun SectionTitle(text: String) {
+    Text(text, color = Ive.ink, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp))
+}
+
+@Composable
+private fun StatusRow(label: String, on: Boolean, action: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(if (on) "✓" else "○", color = if (on) Ive.ok else Ive.warn, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = Ive.ink, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        PillButton(if (on) "Manage" else action, onClick = onClick)
+    }
+}
+
+@Composable
 private fun SettingsSheet(vm: IveViewModel) {
+    val ctx = LocalContext.current
     val cfg = vm.config
     var key by remember { mutableStateOf("") }
     var url by remember(cfg) { mutableStateOf(cfg.baseUrl) }
     var model by remember(cfg) { mutableStateOf(cfg.model) }
     var approval by remember(cfg) { mutableStateOf(cfg.requireApproval) }
+    var sttModel by remember(cfg) { mutableStateOf(cfg.sttModel) }
+    var sttKey by remember { mutableStateOf("") }
+    var sttUrl by remember(cfg) { mutableStateOf(cfg.sttBaseUrl) }
+    var autoSend by remember(cfg) { mutableStateOf(cfg.voiceAutoSend) }
+    var music by remember(cfg) { mutableStateOf(cfg.musicPackage) }
+    var picker by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val tick = AppBridge.tick // re-read permission state whenever the app resumes
+    val overlayOk = remember(tick) { Settings.canDrawOverlays(ctx) }
+    val field = Modifier.fillMaxWidth()
+    val shape = RoundedCornerShape(16.dp)
 
     Box(
         Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.6f)).safeDrawingPadding()
@@ -247,36 +340,102 @@ private fun SettingsSheet(vm: IveViewModel) {
         contentAlignment = Alignment.Center,
     ) {
         Column(
-            Modifier.padding(16.dp).fillMaxWidth().then(Modifier).glass(RoundedCornerShape(30.dp), strong = true)
+            Modifier.padding(16.dp).fillMaxWidth().glass(RoundedCornerShape(30.dp), strong = true)
                 .verticalScroll(rememberScrollState())
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
                 .padding(22.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("Settings", color = Ive.ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+
             OutlinedTextField(
-                value = key, onValueChange = { key = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                value = key, onValueChange = { key = it }, singleLine = true, modifier = field,
                 label = { Text(if (cfg.ready) "API key (saved — type to replace)" else "API key") },
-                visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(16.dp),
+                visualTransformation = PasswordVisualTransformation(), shape = shape,
             )
-            OutlinedTextField(value = url, onValueChange = { url = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("API base URL (https)") }, shape = RoundedCornerShape(16.dp))
-            OutlinedTextField(value = model, onValueChange = { model = it }, singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("Model") }, shape = RoundedCornerShape(16.dp))
+            OutlinedTextField(value = url, onValueChange = { url = it }, singleLine = true, modifier = field, label = { Text("API base URL (https)") }, shape = shape)
+            OutlinedTextField(value = model, onValueChange = { model = it }, singleLine = true, modifier = field, label = { Text("Model") }, shape = shape)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Switch(checked = approval, onCheckedChange = { approval = it })
                 Text("Ask before writing, deleting or opening links", color = Ive.ink2, fontSize = 13.sp, modifier = Modifier.weight(1f))
             }
-            Text("The key is encrypted on this device with the Android Keystore.", color = Ive.ink3, fontSize = 12.sp)
+
+            SectionTitle("Voice input")
+            OutlinedTextField(value = sttModel, onValueChange = { sttModel = it }, singleLine = true, modifier = field, label = { Text("Speech model") }, shape = shape)
+            OutlinedTextField(
+                value = sttKey, onValueChange = { sttKey = it }, singleLine = true, modifier = field, shape = shape,
+                label = { Text(if (cfg.sttApiKey.isNotEmpty()) "Voice key (saved) — optional" else "Voice key — optional, blank reuses the API key") },
+                visualTransformation = PasswordVisualTransformation(),
+            )
+            OutlinedTextField(value = sttUrl, onValueChange = { sttUrl = it }, singleLine = true, modifier = field, label = { Text("Voice base URL — optional") }, shape = shape)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Switch(checked = autoSend, onCheckedChange = { autoSend = it })
+                Text("Send automatically after I stop talking", color = Ive.ink2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            }
+
+            SectionTitle("Music app")
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    if (music.isEmpty()) "Not set — pick the app IVE should control" else InstalledApps.label(ctx, music),
+                    color = Ive.ink, fontSize = 14.sp, modifier = Modifier.weight(1f),
+                )
+                PillButton("Choose") { picker = true }
+                if (music.isNotEmpty()) PillButton("Clear") { music = "" }
+            }
+
+            SectionTitle("App control")
+            Text(
+                "Let IVE open and operate other apps. You are asked before each app, and can revoke any time.",
+                color = Ive.ink3, fontSize = 12.5.sp,
+            )
+            StatusRow("Accessibility service", AppBridge.a11yOn, "Enable") {
+                ctx.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            StatusRow("Display over other apps", overlayOk, "Allow") {
+                ctx.startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            Text(
+                "Installed from an APK and the switch is greyed out? Open Android Settings → Apps → IVE → ⋮ → Allow restricted settings, then enable Accessibility.",
+                color = Ive.ink3, fontSize = 12.sp,
+            )
+            if (vm.grantedApps.isNotEmpty()) {
+                Text("Apps IVE may control", color = Ive.ink2, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                vm.grantedApps.forEach { pkg ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(InstalledApps.label(ctx, pkg), color = Ive.ink, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                        PillButton("Revoke") { vm.revoke(pkg) }
+                    }
+                }
+            }
+
+            Text("Keys are encrypted on this device with the Android Keystore.", color = Ive.ink3, fontSize = 12.sp)
             error?.let { Text(it, color = Ive.bad, fontSize = 13.sp) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
                 PillButton("Cancel") { vm.showSettings = false }
                 PillButton("Save", fill = Ive.accent, textColor = Ive.bg) {
                     val cleanUrl = url.trim().trimEnd('/')
-                    val finalKey = key.trim().ifEmpty { cfg.apiKey }
+                    val cleanStt = sttUrl.trim().trimEnd('/')
                     when {
                         !cleanUrl.startsWith("https://") -> error = "Base URL must start with https://"
+                        cleanStt.isNotEmpty() && !cleanStt.startsWith("https://") -> error = "Voice base URL must start with https://"
                         model.isBlank() -> error = "Model is required"
+                        sttModel.isBlank() -> error = "Speech model is required"
                         else -> {
-                            vm.saveConfig(IveConfig(apiKey = finalKey, baseUrl = cleanUrl, model = model.trim(), requireApproval = approval))
+                            vm.saveConfig(
+                                IveConfig(
+                                    apiKey = key.trim().ifEmpty { cfg.apiKey },
+                                    baseUrl = cleanUrl,
+                                    model = model.trim(),
+                                    requireApproval = approval,
+                                    sttModel = sttModel.trim(),
+                                    sttBaseUrl = cleanStt,
+                                    sttApiKey = sttKey.trim().ifEmpty { cfg.sttApiKey },
+                                    voiceAutoSend = autoSend,
+                                    musicPackage = music,
+                                ),
+                            )
                             error = null
                             vm.showSettings = false
                         }
@@ -284,5 +443,25 @@ private fun SettingsSheet(vm: IveViewModel) {
                 }
             }
         }
+    }
+
+    if (picker) {
+        val apps = remember { InstalledApps.launchable(ctx) }
+        AlertDialog(
+            onDismissRequest = { picker = false },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { picker = false }) { Text("Cancel") } },
+            title = { Text("Choose your music app") },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    items(apps) { a ->
+                        Text(
+                            a.label, color = Ive.ink, fontSize = 15.sp,
+                            modifier = Modifier.fillMaxWidth().clickable { music = a.pkg; picker = false }.padding(vertical = 12.dp),
+                        )
+                    }
+                }
+            },
+        )
     }
 }

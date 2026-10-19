@@ -30,6 +30,7 @@ public sealed class MainWindow : Window
     private readonly SettingsStore _settings;
     private readonly TaskManager _tasks;
     private readonly MediaService _media;
+    private readonly VoiceSession _voice;
 
     public Func<Task<string>> TestConnection;
     public bool AllowClose;
@@ -57,7 +58,7 @@ public sealed class MainWindow : Window
     private TextBlock _count;
 
     // music
-    private TextBlock _npTitle, _npArtist, _note;
+    private TextBlock _npTitle, _npArtist, _npSource, _note;
     private Border _npPlay;
 
     // settings
@@ -66,10 +67,15 @@ public sealed class MainWindow : Window
     private ToggleSwitch _approve, _login;
     private WrapPanel _triggerPanel;
     private TextBlock _msg, _keyHint;
-    private string _trigger = "RightCtrl";
+    private string _trigger = "RightCtrl", _music = "";
+    private TextBox _sttModel, _sttUrl, _voiceHotkey, _musicLaunch;
+    private PasswordBox _sttKey;
+    private ToggleSwitch _autoSend;
+    private WrapPanel _musicPanel;
 
-    public MainWindow(SettingsStore settings, TaskManager tasks, MediaService media)
+    public MainWindow(SettingsStore settings, TaskManager tasks, MediaService media, VoiceSession voice)
     {
+        _voice = voice;
         _settings = settings;
         _tasks = tasks;
         _media = media;
@@ -246,6 +252,7 @@ public sealed class MainWindow : Window
             var (icon, text) = ((TextBlock, TextBlock))_nav[i].Tag;
             icon.Foreground = text.Foreground = active ? Ui.Ink : Ui.Ink2;
         }
+        if (idx == 2) BuildMusicPills();
         MoveIndicator(animate);
     }
 
@@ -353,10 +360,16 @@ public sealed class MainWindow : Window
         var comp = new Grid { Margin = new Thickness(0) };
         comp.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         comp.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        comp.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var mic = new MicButton(_voice, 40, OnVoiceText, m => Toast(m));
+        mic.VerticalAlignment = VerticalAlignment.Bottom;
+        mic.Margin = new Thickness(0, 0, 8, 0);
         var askHost = WithPlaceholder(_ask, "Ask IVE to do something…", 15.5);
         askHost.Margin = new Thickness(8, 6, 14, 6);
-        Grid.SetColumn(send, 1);
+        Grid.SetColumn(mic, 1);
+        Grid.SetColumn(send, 2);
         comp.Children.Add(askHost);
+        comp.Children.Add(mic);
         comp.Children.Add(send);
         var composer = Ui.Glass(comp, 26, true);
         composer.Padding = new Thickness(14, 8, 8, 8);
@@ -373,6 +386,13 @@ public sealed class MainWindow : Window
         page.Children.Add(bar);
         page.Children.Add(_taskList);
         return page;
+    }
+
+    private void OnVoiceText(string text)
+    {
+        _ask.Text = (_ask.Text + " " + text).Trim();
+        _ask.CaretIndex = _ask.Text.Length;
+        if (_settings.Current.VoiceAutoSend) Send();
     }
 
     private void Send()
@@ -493,6 +513,9 @@ public sealed class MainWindow : Window
         var meta = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(24, 0, 0, 0) };
         meta.Children.Add(_npTitle);
         meta.Children.Add(_npArtist);
+        _npSource = Ui.Text("", 12, Ui.Ink3);
+        _npSource.Margin = new Thickness(0, 8, 0, 0);
+        meta.Children.Add(_npSource);
         var head = new DockPanel();
         DockPanel.SetDock(art, Dock.Left);
         head.Children.Add(art);
@@ -515,6 +538,15 @@ public sealed class MainWindow : Window
         card.Padding = new Thickness(26);
         page.Children.Add(card);
 
+        var open = Ui.Pill("Open music app", Ui.Ghost, Ui.Ink, () =>
+        {
+            var err = MediaService.Launch(_settings.Current.MusicLaunch);
+            if (err != null) Toast(err);
+        });
+        open.HorizontalAlignment = HorizontalAlignment.Left;
+        open.Margin = new Thickness(0, 16, 0, 0);
+        page.Children.Add(open);
+
         _note = Ui.Text("", 12.5, Ui.Ink3, wrap: true);
         _note.Margin = new Thickness(6, 16, 6, 0);
         page.Children.Add(_note);
@@ -526,6 +558,7 @@ public sealed class MainWindow : Window
         var m = _media.State;
         _npTitle.Text = m.Active && m.Title.Length > 0 ? m.Title : "Nothing playing";
         _npArtist.Text = m.Active ? m.Artist : "";
+        _npSource.Text = string.IsNullOrEmpty(_settings.Current.MusicApp) ? "Controlling: whatever is playing" : "Controlling: " + _settings.Current.MusicApp;
         ((TextBlock)_npPlay.Child).Text = m.Playing ? "\uE769" : "\uE768";
         _note.Text = m.Active ? "" : "Play something in Spotify, YouTube, Apple Music… and it shows up here and in the notch.";
     }
@@ -542,6 +575,13 @@ public sealed class MainWindow : Window
         _model = new TextBox();
         _hotkey = new TextBox();
         _workspace = new TextBox();
+        _sttModel = new TextBox();
+        _sttUrl = new TextBox();
+        _voiceHotkey = new TextBox();
+        _musicLaunch = new TextBox();
+        _sttKey = new PasswordBox();
+        _autoSend = new ToggleSwitch();
+        _musicPanel = new WrapPanel();
         _keyHint = Ui.Text("Encrypted with your Windows account (DPAPI).", 12, Ui.Ink3, wrap: true);
         _keyHint.Margin = new Thickness(2, 6, 0, 0);
 
@@ -562,6 +602,17 @@ public sealed class MainWindow : Window
         _login = new ToggleSwitch();
         form.Children.Add(Switch(_approve, "Ask before writing files, deleting or running commands (recommended)"));
         form.Children.Add(Switch(_login, "Launch IVE when I sign in"));
+
+        form.Children.Add(Section("Voice input"));
+        form.Children.Add(Labeled("Speech model", Ui.Field(_sttModel)));
+        form.Children.Add(Labeled("Voice API key (optional — blank reuses the main key)", Ui.Field(_sttKey)));
+        form.Children.Add(Labeled("Voice base URL (optional — blank reuses the main one)", Ui.Field(_sttUrl)));
+        form.Children.Add(Labeled("Voice shortcut", Ui.Field(_voiceHotkey)));
+        form.Children.Add(Switch(_autoSend, "Send automatically after I stop talking"));
+
+        form.Children.Add(Section("Music"));
+        form.Children.Add(Labeled("Music app IVE controls (shown when it is playing)", _musicPanel));
+        form.Children.Add(Labeled("Launch target for “Open music app” (exe path, spotify:, …)", Ui.Field(_musicLaunch)));
 
         _msg = Ui.Text("", 13, Ui.Bad, wrap: true);
         var test = Ui.Pill("Test connection", Ui.Ghost, Ui.Ink, async () =>
@@ -588,6 +639,30 @@ public sealed class MainWindow : Window
         quit.Margin = new Thickness(0, 18, 0, 0);
         page.Children.Add(quit);
         return page;
+    }
+
+    private static TextBlock Section(string t)
+    {
+        var h = Ui.Text(t, 16, Ui.Ink, FontWeights.Bold);
+        h.Margin = new Thickness(0, 10, 0, 12);
+        return h;
+    }
+
+    private void BuildMusicPills()
+    {
+        _musicPanel.Children.Clear();
+        var names = new List<string> { "" };
+        foreach (var n in _media.Sources()) if (!names.Contains(n)) names.Add(n);
+        if (!string.IsNullOrEmpty(_music) && !names.Any(n => n.Equals(_music, StringComparison.OrdinalIgnoreCase))) names.Add(_music);
+        foreach (var n in names)
+        {
+            var name = n;
+            var selected = string.Equals(name, _music ?? "", StringComparison.OrdinalIgnoreCase);
+            var pill = Ui.Pill(name.Length == 0 ? "Auto (system)" : name, selected ? Ui.AccentGradient() : Ui.Ghost, selected ? Ui.Dark : Ui.Ink, () => { _music = name; BuildMusicPills(); }, 12.5);
+            pill.Margin = new Thickness(0, 0, 8, 8);
+            pill.Padding = new Thickness(14, 7, 14, 7);
+            _musicPanel.Children.Add(pill);
+        }
     }
 
     private static StackPanel Labeled(string label, UIElement field)
@@ -636,6 +711,13 @@ public sealed class MainWindow : Window
         _approve.IsOn = s.RequireApproval;
         _login.IsOn = s.LaunchAtLogin;
         _trigger = s.TriggerKey;
+        _sttModel.Text = s.SttModel;
+        _sttUrl.Text = s.SttBaseUrl;
+        _voiceHotkey.Text = s.VoiceHotkey;
+        _autoSend.IsOn = s.VoiceAutoSend;
+        _musicLaunch.Text = s.MusicLaunch;
+        _music = s.MusicApp ?? "";
+        BuildMusicPills();
         _keyHint.Text = _settings.HasKey ? $"Saved ({_settings.KeyHint}) — type a new key to replace it. Encrypted with your Windows account (DPAPI)." : "Encrypted with your Windows account (DPAPI).";
         BuildTriggerPills();
     }
@@ -653,9 +735,17 @@ public sealed class MainWindow : Window
                 s.TriggerKey = _trigger;
                 s.RequireApproval = _approve.IsOn;
                 s.LaunchAtLogin = _login.IsOn;
+                s.SttModel = _sttModel.Text;
+                s.SttBaseUrl = _sttUrl.Text;
+                s.VoiceHotkey = _voiceHotkey.Text;
+                s.VoiceAutoSend = _autoSend.IsOn;
+                s.MusicApp = _music;
+                s.MusicLaunch = _musicLaunch.Text;
                 if (_key.Password.Length > 0) s.ApiKey = _key.Password;
+                if (_sttKey.Password.Length > 0) s.SttApiKey = _sttKey.Password;
             });
             _key.Clear();
+            _sttKey.Clear();
             _msg.Text = "";
             RefreshSettings();
             Toast("Settings saved");

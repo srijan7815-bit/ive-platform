@@ -1,14 +1,22 @@
 package com.srijan.ive
 
 import android.content.Context
+import android.content.Intent
 import android.media.AudioManager
 import android.view.KeyEvent
 
-/** Transport control for whatever app is playing — no special permission needed. */
+/** Transport control. With a package it targets exactly the music app the user chose; otherwise whatever is playing. */
 object MediaKeys {
-    fun send(context: Context, keyCode: Int) {
-        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
-        am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
+    fun send(context: Context, keyCode: Int, pkg: String = "") {
+        for (action in intArrayOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+            val event = KeyEvent(action, keyCode)
+            if (pkg.isNotEmpty()) {
+                context.sendBroadcast(
+                    Intent(Intent.ACTION_MEDIA_BUTTON).setPackage(pkg).putExtra(Intent.EXTRA_KEY_EVENT, event),
+                )
+            } else {
+                (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager).dispatchMediaKeyEvent(event)
+            }
+        }
     }
 }

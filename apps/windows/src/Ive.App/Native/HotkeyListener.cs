@@ -1,17 +1,17 @@
 using System;
+using System.Collections.Generic;
 using System.Windows.Input;
 using System.Windows.Interop;
 
 namespace Ive.App.Native;
 
-/// <summary>Global hotkey via RegisterHotKey on a message-only window.</summary>
+/// <summary>Global hotkeys via RegisterHotKey on a message-only window. Each hotkey has a small integer id.</summary>
 internal sealed class HotkeyListener : IDisposable
 {
-    private const int Id = 0xA11E;
     private readonly HwndSource _source;
-    private bool _registered;
+    private readonly HashSet<int> _registered = new();
 
-    public event Action Pressed;
+    public event Action<int> Pressed;
 
     public HotkeyListener()
     {
@@ -21,18 +21,18 @@ internal sealed class HotkeyListener : IDisposable
 
     private IntPtr Hook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == Win32.WM_HOTKEY && (int)(long)wParam == Id)
+        if (msg == Win32.WM_HOTKEY)
         {
             handled = true;
-            Pressed?.Invoke();
+            Pressed?.Invoke((int)(long)wParam);
         }
         return IntPtr.Zero;
     }
 
-    /// <summary>Accepts specs like "Ctrl+Alt+Space". Returns false if the combination is invalid or already taken.</summary>
-    public bool Register(string spec)
+    /// <summary>Accepts specs like "Ctrl+Alt+Space". Returns false if invalid or already taken by another app.</summary>
+    public bool Register(int id, string spec)
     {
-        Unregister();
+        Unregister(id);
         uint mods = 0x4000; // MOD_NOREPEAT
         uint vk = 0;
         foreach (var raw in (spec ?? "").Split('+'))
@@ -50,19 +50,19 @@ internal sealed class HotkeyListener : IDisposable
             }
         }
         if (vk == 0) return false;
-        _registered = Win32.RegisterHotKey(_source.Handle, Id, mods, vk);
-        return _registered;
+        var ok = Win32.RegisterHotKey(_source.Handle, id, mods, vk);
+        if (ok) _registered.Add(id);
+        return ok;
     }
 
-    private void Unregister()
+    private void Unregister(int id)
     {
-        if (_registered) Win32.UnregisterHotKey(_source.Handle, Id);
-        _registered = false;
+        if (_registered.Remove(id)) Win32.UnregisterHotKey(_source.Handle, id);
     }
 
     public void Dispose()
     {
-        Unregister();
+        foreach (var id in new List<int>(_registered)) Unregister(id);
         _source.Dispose();
     }
 }

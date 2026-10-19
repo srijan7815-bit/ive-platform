@@ -8,6 +8,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using Ive.App.Native;
 using Ive.App.Services;
+using Ive.Core;
 
 namespace Ive.App.UI;
 
@@ -27,6 +28,10 @@ public sealed class PromptWindow : Window
     private readonly TextBox _input;
     private readonly TextBlock _placeholder;
     private readonly WrapPanel _chips;
+    private readonly VoiceSession _voice;
+    private readonly SettingsStore _settings;
+    private readonly MicButton _mic;
+    private readonly TextBlock _notice;
     private readonly ScaleTransform _scale = new(1, 1);
     private readonly BlurEffect _blur = new() { Radius = 0, RenderingBias = RenderingBias.Performance };
     private bool _open;
@@ -36,8 +41,10 @@ public sealed class PromptWindow : Window
 
     public event Action<string> Submitted;
 
-    public PromptWindow()
+    public PromptWindow(VoiceSession voice, SettingsStore settings)
     {
+        _voice = voice;
+        _settings = settings;
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
@@ -92,8 +99,18 @@ public sealed class PromptWindow : Window
         };
         _placeholder = Ui.Text("Tell IVE what to do…", 17, Ui.Ink3);
         _placeholder.IsHitTestVisible = false;
-        var inputHost = new Grid { Margin = new Thickness(0, 10, 0, 10) };
+        var inputHost = new Grid { Margin = new Thickness(0, 6, 12, 6), VerticalAlignment = VerticalAlignment.Center };
         inputHost.Children.Add(_placeholder); inputHost.Children.Add(_input);
+        _notice = Ui.Text("", 11.5, Ui.Bad, wrap: true);
+        _notice.Visibility = Visibility.Collapsed;
+        _mic = new MicButton(voice, 40, OnVoiceText, m => { _notice.Text = m; _notice.Visibility = Visibility.Visible; });
+        _mic.VerticalAlignment = VerticalAlignment.Top;
+        _mic.Margin = new Thickness(0, 2, 0, 0);
+        var inputRow = new Grid { Margin = new Thickness(0, 8, 0, 8) };
+        inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        inputRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(_mic, 1);
+        inputRow.Children.Add(inputHost); inputRow.Children.Add(_mic);
         _input.TextChanged += (_, _) => { _placeholder.Visibility = _input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; _chips.Visibility = _input.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; };
         _input.PreviewKeyDown += OnKey;
 
@@ -108,7 +125,7 @@ public sealed class PromptWindow : Window
         }
 
         var body = new StackPanel { Margin = new Thickness(20, 16, 20, 8) };
-        body.Children.Add(head); body.Children.Add(inputHost); body.Children.Add(_chips);
+        body.Children.Add(head); body.Children.Add(inputRow); body.Children.Add(_notice); body.Children.Add(_chips);
 
         _inner.Children.Add(_backdrop); _inner.Children.Add(tint); _inner.Children.Add(sheen); _inner.Children.Add(body);
         _inner.SizeChanged += (_, e) => _inner.Clip = new RectangleGeometry(new Rect(0, 0, e.NewSize.Width, e.NewSize.Height), 25, 25);
@@ -153,7 +170,24 @@ public sealed class PromptWindow : Window
     }
 
     /// <summary>origin/end are physical screen pixels.</summary>
-    public void OpenAt(Point origin, Point end)
+    public bool IsOpen => _open;
+
+    public void ToggleVoice() => _mic.Toggle();
+
+    private void OnVoiceText(string text)
+    {
+        if (!_open) return;
+        var t = (_input.Text + " " + text).Trim();
+        _input.Text = t;
+        _input.CaretIndex = t.Length;
+        if (_settings.Current.VoiceAutoSend)
+        {
+            Submitted?.Invoke(t);
+            CloseBox();
+        }
+    }
+
+    public void OpenAt(Point origin, Point end, bool startVoice = false)
     {
         var wa = System.Windows.Forms.Screen.FromPoint(new System.Drawing.Point((int)end.X, (int)end.Y)).WorkingArea;
         var scale = Win32.DpiScaleAt((int)end.X, (int)end.Y);
@@ -167,6 +201,7 @@ public sealed class PromptWindow : Window
         _backdrop.Source = ScreenCapture.Grab(x, y, wPx, hPx); // before we appear, so we are not in the shot
         _root.LayoutTransform = new ScaleTransform(_u, _u);
         _input.Text = "";
+        _notice.Visibility = Visibility.Collapsed;
 
         var hwnd = new WindowInteropHelper(this).EnsureHandle();
         Win32.SetWindowPos(hwnd, Win32.HWND_TOPMOST, x, y, 0, 0, Win32.SWP_NOSIZE | Win32.SWP_NOACTIVATE);
@@ -191,6 +226,7 @@ public sealed class PromptWindow : Window
         Activate();
         _input.Focus();
         Keyboard.Focus(_input);
+        if (startVoice) _mic.Toggle();
 
         // liquid entrance: spring scale + fast fade + focus-pull blur
         _host.Effect = _blur;
@@ -208,6 +244,7 @@ public sealed class PromptWindow : Window
     {
         if (!_open) return;
         _open = false;
+        _voice.Cancel();
         var mine = ++_seq;
         _host.Effect = _blur;
         _scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.4, TimeSpan.FromMilliseconds(220)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn } });

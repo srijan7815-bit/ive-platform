@@ -11,16 +11,29 @@ public interface ISecretProtector
 
 public sealed class IveSettings
 {
-    public string ApiBaseUrl { get; set; } = "https://codecraftapi.com/v1";
-    public string Model { get; set; } = "claude-opus-5-5";
+    public string ApiBaseUrl { get; set; } = "https://api.groq.com/openai/v1";
+    public string Model { get; set; } = "llama-3.3-70b-versatile";
     public string TriggerKey { get; set; } = "RightCtrl";
     public string Hotkey { get; set; } = "Ctrl+Alt+Space";
     public bool RequireApproval { get; set; } = true;
     public string WorkspaceDir { get; set; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     public bool LaunchAtLogin { get; set; }
 
+    // Voice input (Groq Whisper by default). Blank base URL / key = reuse the main ones.
+    public string SttModel { get; set; } = "whisper-large-v3-turbo";
+    public string SttBaseUrl { get; set; } = "";
+    public string VoiceHotkey { get; set; } = "Ctrl+Alt+V";
+    public bool VoiceAutoSend { get; set; } = true;
+
+    // Music: the user chooses which app IVE controls.
+    public string MusicApp { get; set; } = "";     // substring of the media source app id, e.g. "Spotify"
+    public string MusicLaunch { get; set; } = "";  // what "Open music app" starts: exe path, URI (spotify:) or shell command
+
     /// <summary>Never written to disk in clear text — see <see cref="SettingsStore"/>.</summary>
     [JsonIgnore] public string ApiKey { get; set; } = "";
+
+    /// <summary>Optional separate key for speech-to-text; blank = use <see cref="ApiKey"/>.</summary>
+    [JsonIgnore] public string SttApiKey { get; set; } = "";
 
     public IveSettings Clone() => (IveSettings)MemberwiseClone();
 }
@@ -34,6 +47,7 @@ public sealed class SettingsStore
     {
         public IveSettings Settings { get; set; } = new();
         public string ApiKeyProtected { get; set; }
+        public string SttApiKeyProtected { get; set; }
     }
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
@@ -61,6 +75,8 @@ public sealed class SettingsStore
                     Current.ApiKey = key;
                     if (!string.IsNullOrEmpty(p.ApiKeyProtected) && string.IsNullOrEmpty(key))
                         Current.ApiKey = _protector.Unprotect(p.ApiKeyProtected);
+                    if (!string.IsNullOrEmpty(p.SttApiKeyProtected))
+                        Current.SttApiKey = _protector.Unprotect(p.SttApiKeyProtected);
                 }
             }
         }
@@ -98,6 +114,21 @@ public sealed class SettingsStore
         if (string.IsNullOrWhiteSpace(s.Hotkey)) throw new ArgumentException("Shortcut is required.");
         if (!Directory.Exists(s.WorkspaceDir)) throw new ArgumentException("Workspace folder does not exist.");
         s.ApiKey = (s.ApiKey ?? "").Trim();
+        s.SttApiKey = (s.SttApiKey ?? "").Trim();
+
+        s.SttBaseUrl = (s.SttBaseUrl ?? "").Trim();
+        if (s.SttBaseUrl.Length > 0)
+        {
+            if (!Uri.TryCreate(s.SttBaseUrl, UriKind.Absolute, out var stt) || (stt.Scheme != Uri.UriSchemeHttps && !(stt.Scheme == Uri.UriSchemeHttp && stt.IsLoopback)))
+                throw new ArgumentException("Voice base URL must be a valid https:// URL (or blank to reuse the main one).");
+            s.SttBaseUrl = stt.ToString().TrimEnd('/');
+        }
+        if (string.IsNullOrWhiteSpace(s.SttModel) || s.SttModel.Length > 100) throw new ArgumentException("Voice model is required.");
+        s.SttModel = s.SttModel.Trim();
+        if (string.IsNullOrWhiteSpace(s.VoiceHotkey)) throw new ArgumentException("Voice shortcut is required.");
+        s.MusicApp = (s.MusicApp ?? "").Trim();
+        s.MusicLaunch = (s.MusicLaunch ?? "").Trim();
+        if (s.MusicApp.Length > 200 || s.MusicLaunch.Length > 500) throw new ArgumentException("Music app settings are too long.");
     }
 
     private void Save()
@@ -106,6 +137,7 @@ public sealed class SettingsStore
         {
             Settings = Current,
             ApiKeyProtected = HasKey ? _protector.Protect(Current.ApiKey) : null,
+            SttApiKeyProtected = string.IsNullOrWhiteSpace(Current.SttApiKey) ? null : _protector.Protect(Current.SttApiKey),
         };
         Directory.CreateDirectory(Path.GetDirectoryName(_file)!);
         var tmp = _file + ".tmp";

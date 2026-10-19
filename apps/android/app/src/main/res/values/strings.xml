@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">IVE</string>
+    <string name="a11y_description">Lets IVE read the screen and tap, type and scroll in apps you have explicitly allowed it to control. You are asked before each app, and can revoke access any time.</string>
 </resources>

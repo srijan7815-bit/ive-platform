@@ -27,9 +27,11 @@ public sealed class Toolbox
     private readonly string _workspace;
     private readonly bool _requireApproval;
     private readonly Func<ApprovalRequest, Task<bool>> _approve;
+    private readonly Func<string, Task<string>> _music;
 
-    public Toolbox(string workspace, bool requireApproval, Func<ApprovalRequest, Task<bool>> approve)
+    public Toolbox(string workspace, bool requireApproval, Func<ApprovalRequest, Task<bool>> approve, Func<string, Task<string>> music = null)
     {
+        _music = music;
         _workspace = workspace;
         _requireApproval = requireApproval;
         _approve = approve;
@@ -65,6 +67,7 @@ public sealed class Toolbox
         Fn("write_file", "Create or overwrite a text file. Requires user approval.", new[] { "path", "content" }, new[] { "path", "content" }),
         Fn("delete_file", "Delete a single file. Requires user approval.", new[] { "path" }, new[] { "path" }),
         Fn("run_command", "Run a shell command (60 s timeout). Requires user approval.", new[] { "command", "cwd" }, new[] { "command" }),
+        Fn("music_control", "Control the user's chosen music app. action = play_pause | next | previous | open.", new[] { "action" }, new[] { "action" }),
     };
 
     public static string Describe(string name, JsonObject a)
@@ -76,6 +79,7 @@ public sealed class Toolbox
             "list_dir" => "Listing " + (Path.GetFileName(S("path")) is { Length: > 0 } n ? n : S("path")),
             "write_file" => "Writing " + Path.GetFileName(S("path")),
             "delete_file" => "Deleting " + Path.GetFileName(S("path")),
+            "music_control" => "Music: " + S("action"),
             "run_command" => "Running " + (S("command").Length > 40 ? S("command")[..40] : S("command")),
             _ => name,
         };
@@ -124,6 +128,8 @@ public sealed class Toolbox
                     File.Delete(target);
                     return new JsonObject { ["ok"] = true };
                 }
+                case "music_control":
+                    return _music == null ? Err("Music control is not available.") : new JsonObject { ["result"] = await _music(Str("action")) };
                 case "run_command":
                     return await RunCommandAsync(Str("command"), string.IsNullOrEmpty(Str("cwd")) ? _workspace : Resolve(Str("cwd")), ct).ConfigureAwait(false);
                 default:

@@ -24,9 +24,12 @@ public sealed class IveHost : IDisposable
     private NotchWindow _notch;
     private PromptWindow _prompt;
     private MainWindow _main;
+    private VoiceSession _voice;
     private GestureHook _gesture;
     private HotkeyListener _hotkey;
     private System.Windows.Forms.NotifyIcon _tray;
+
+    private const int HotAsk = 1, HotVoice = 2;
 
     public IveHost(System.Windows.Application app) => _app = app;
 
@@ -41,8 +44,9 @@ public sealed class IveHost : IDisposable
         _media = new MediaService();
 
         _notch = new NotchWindow();
-        _prompt = new PromptWindow();
-        _main = new MainWindow(_settings, _tasks, _media);
+        _voice = new VoiceSession(_settings);
+        _prompt = new PromptWindow(_voice, _settings);
+        _main = new MainWindow(_settings, _tasks, _media, _voice);
 
         _tasks.TasksChanged += () => UI(() => { _main.RefreshTasks(); _notch.SetRunning(_tasks.ActiveCount); });
         _tasks.PhaseChanged += p => UI(() => _notch.SetPhase(p));
@@ -63,11 +67,12 @@ public sealed class IveHost : IDisposable
         _gesture.Tapped += () => UI(() => { if (_main.IsVisible && _main.IsActive) _main.Hide(); else _main.ShowAndFocus(); });
 
         _hotkey = new HotkeyListener();
-        _hotkey.Pressed += () =>
+        _hotkey.Pressed += id =>
         {
             Win32.GetCursorPos(out var p);
             var pt = new System.Windows.Point(p.X, p.Y);
-            UI(() => _prompt.OpenAt(pt, pt));
+            if (id == HotAsk) UI(() => _prompt.OpenAt(pt, pt));
+            else if (id == HotVoice) UI(() => { if (_prompt.IsOpen) _prompt.ToggleVoice(); else _prompt.OpenAt(pt, pt, startVoice: true); });
         };
 
         BuildTray();
@@ -86,7 +91,10 @@ public sealed class IveHost : IDisposable
     {
         var s = _settings.Current;
         _gesture.SetTrigger(s.TriggerKey);
-        if (!_hotkey.Register(s.Hotkey)) _main.RefreshSettings();
+        _media.Preferred = s.MusicApp;
+        var okAsk = _hotkey.Register(HotAsk, s.Hotkey);
+        var okVoice = _hotkey.Register(HotVoice, s.VoiceHotkey);
+        if (!okAsk || !okVoice) _main.RefreshSettings();
         _notch.SetHasKey(_settings.HasKey);
         try
         {
@@ -101,8 +109,20 @@ public sealed class IveHost : IDisposable
     private Task<string> RunAgent(string prompt, Func<ApprovalRequest, Task<bool>> approve, Action<AgentEvent> onEvent, CancellationToken ct)
     {
         var s = _settings.Current.Clone();
-        var tools = new Toolbox(s.WorkspaceDir, s.RequireApproval, approve);
+        var tools = new Toolbox(s.WorkspaceDir, s.RequireApproval, approve, MusicToolAsync);
         return new AgentRunner().RunAsync(prompt, s.WorkspaceDir, tools, (m, t, c) => _ai.ChatAsync(s, m, t, c), onEvent, ct);
+    }
+
+    private async Task<string> MusicToolAsync(string action)
+    {
+        switch ((action ?? "").ToLowerInvariant())
+        {
+            case "play_pause": case "play": case "pause": await _media.ControlAsync("playpause"); return "ok";
+            case "next": await _media.ControlAsync("next"); return "ok";
+            case "previous": case "prev": await _media.ControlAsync("prev"); return "ok";
+            case "open": return MediaService.Launch(_settings.Current.MusicLaunch) ?? "opened";
+            default: return "unknown action";
+        }
     }
 
     private async Task<string> TestConnectionAsync()
@@ -136,6 +156,12 @@ public sealed class IveHost : IDisposable
             Win32.GetCursorPos(out var p);
             var pt = new System.Windows.Point(p.X, p.Y);
             _prompt.OpenAt(pt, pt);
+        }));
+        menu.Items.Add("Ask with voice", null, (_, _) => UI(() =>
+        {
+            Win32.GetCursorPos(out var p);
+            var pt = new System.Windows.Point(p.X, p.Y);
+            _prompt.OpenAt(pt, pt, startVoice: true);
         }));
         menu.Items.Add("Open IVE", null, (_, _) => UI(() => _main.ShowAndFocus()));
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
