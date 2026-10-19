@@ -204,7 +204,7 @@ public sealed class NotchWindow : Window
     public void SetRunning(int n) { _running = n; Render(); }
     public void SetHasKey(bool has) { _hasKey = has; Render(); }
 
-    public void SetMedia(MediaState m)
+    public void SetMedia(MediaInfo m)
     {
         _mTitle.Text = m.Active && m.Title.Length > 0 ? m.Title : "Nothing playing";
         _mArtist.Text = m.Active ? m.Artist : "Start music anywhere to control it here";

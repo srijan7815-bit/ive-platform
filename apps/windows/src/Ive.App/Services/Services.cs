@@ -25,9 +25,9 @@ public sealed class DpapiProtector : ISecretProtector
         Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(cipher), null, DataProtectionScope.CurrentUser));
 }
 
-public sealed record MediaState(bool Active, string Title, string Artist, bool Playing)
+public sealed record MediaInfo(bool Active, string Title, string Artist, bool Playing)
 {
-    public static readonly MediaState None = new(false, "", "", false);
+    public static readonly MediaInfo None = new(false, "", "", false);
 }
 
 /// <summary>Now-playing and transport control through the Windows System Media Transport Controls (WinRT).</summary>
@@ -35,14 +35,14 @@ public sealed class MediaService : IDisposable
 {
     private GlobalSystemMediaTransportControlsSessionManager _mgr;
     private Timer _timer;
-    private MediaState _state = MediaState.None;
+    private MediaInfo _state = MediaInfo.None;
     private int _busy;
 
-    public MediaState State => _state;
+    public MediaInfo State => _state;
 
     /// <summary>Substring of the media source app id the user chose (e.g. "Spotify"). Blank = whatever Windows considers current.</summary>
     public string Preferred { get; set; } = "";
-    public event Action<MediaState> Changed;
+    public event Action<MediaInfo> Changed;
 
     public async Task StartAsync()
     {
@@ -60,12 +60,12 @@ public sealed class MediaService : IDisposable
         try
         {
             var s = Pick();
-            var next = MediaState.None;
+            var next = MediaInfo.None;
             if (s != null)
             {
                 var props = await s.TryGetMediaPropertiesAsync();
                 var playing = s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
-                next = new MediaState(true, props.Title ?? "", props.Artist ?? "", playing);
+                next = new MediaInfo(true, props.Title ?? "", props.Artist ?? "", playing);
             }
             if (next != _state) { _state = next; Changed?.Invoke(next); }
         }
