@@ -17,11 +17,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [csharp, java-kotlin]
+        include:
+          - language: csharp
+            build-mode: none
+          - language: java-kotlin
+            build-mode: manual
     steps:
       - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          build-mode: none
-      - uses: github/codeql-action/analyze@v3
+          build-mode: ${{ matrix.build-mode }}
+      - if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - if: matrix.language == 'java-kotlin'
+        working-directory: apps/android
+        run: ./gradlew :app:assembleDebug --no-daemon --console=plain
+      - uses: github/codeql-action/analyze@v4

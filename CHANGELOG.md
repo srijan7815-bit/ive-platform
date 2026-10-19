@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versioning: [SemVer](https://semver.org/).
 
+## [1.1.1] — 2026-10-21
+
+### Fixed
+- Windows: startup failures now show a dialog and write `%AppData%\IVE\crash.log` instead of failing silently.
+- CI: CodeQL for Kotlin builds correctly; actions upgraded.
+
 ## [1.1.0] — 2026-10-21
 
 ### Added
