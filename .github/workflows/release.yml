@@ -20,7 +20,7 @@ jobs:
           --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -p:EnableCompressionInSingleFile=true -o out/windows
       - run: Rename-Item out/windows/IVE.exe "IVE-${{ github.ref_name }}-windows-x64.exe"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: win, path: "out/windows/IVE-*.exe" }
 
   android:
@@ -33,7 +33,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew :app:testDebugUnitTest :app:assembleRelease --stacktrace
       - run: cp app/build/outputs/apk/release/app-release.apk "IVE-${{ github.ref_name }}-android.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with: { name: android, path: "apps/android/IVE-*.apk" }
 
   publish:

@@ -39,7 +39,7 @@ jobs:
         if: failure()
         run: |
           grep -E "error |Failed |Assert|Error Message" build.log | sort -u | head -40 | while IFS= read -r l; do echo "::error::${l:0:420}"; done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: IVE-windows-x64
           path: out/windows/IVE.exe
@@ -65,7 +65,7 @@ jobs:
         if: failure()
         run: |
           grep -E "^e: |error:|FAILED|What went wrong|Unresolved|Caused by" -A1 build.log | grep -v "^--" | sort -u | head -40 | while IFS= read -r l; do echo "::error::${l:0:420}"; done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: IVE-android-debug
           path: apps/android/app/build/outputs/apk/debug/app-debug.apk
